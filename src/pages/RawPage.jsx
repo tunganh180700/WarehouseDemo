@@ -1,27 +1,36 @@
-import { useState, useRef } from "react";
-import { rawData as sampleRawData } from "../data/mockData";
+import { useState, useRef, useEffect } from "react";
 
 const IMPORT_API = "http://192.168.10.164:5044/api/import";
+// Nếu có API lấy danh sách nguồn thì thay URL này
+const LIST_API = "http://localhost:5044/api/raw-sources";
 
-function RawPage() {
-  const [data, setData] = useState(sampleRawData);
-  const [columns, setColumns] = useState([
-    "id",
-    "source",
-    "timestamp",
-    "product_code",
-    "qty",
-    "price",
-    "customer",
-    "note",
-  ]);
-  const [fileName, setFileName] = useState(null);
+function RawSourcesPage() {
+  const [sources, setSources] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [loading, setLoading] = useState(false);
   const fileInputRef = useRef(null);
 
-  const handleImportClick = () => {
+  // Load danh sách (nếu có API list)
+  useEffect(() => {
+    fetchList();
+  }, []);
+
+  const fetchList = async () => {
+    try {
+      const res = await fetch(LIST_API);
+      if (res.ok) {
+        const data = await res.json();
+        setSources(Array.isArray(data) ? data : data.data || []);
+      }
+    } catch {
+      // giữ mock nếu chưa có API list
+    }
+  };
+
+  const handleAddClick = () => {
     fileInputRef.current?.click();
   };
 
@@ -30,17 +39,8 @@ function RawPage() {
     if (!file) return;
     e.target.value = "";
 
-    const isExcel =
-      /\.(xlsx|xls|csv)$/i.test(file.name) ||
-      [
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-excel",
-        "text/csv",
-      ].includes(file.type);
-
-    if (!isExcel) {
-      setError("Vui lòng chọn file Excel (.xlsx, .xls) hoặc CSV.");
-      setSuccess(null);
+    if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
+      setError("Chỉ hỗ trợ file .xlsx, .xls, .csv");
       return;
     }
 
@@ -50,43 +50,33 @@ function RawPage() {
 
     try {
       const formData = new FormData();
-      formData.append("file", file); // field name: file
+      formData.append("file", file);
 
       const res = await fetch(IMPORT_API, {
         method: "POST",
         body: formData,
-        // Không set Content-Type — browser tự gắn multipart boundary
       });
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new Error(text || `Import thất bại (HTTP ${res.status})`);
+        throw new Error(text || `Import thất bại (${res.status})`);
       }
 
-      // Nếu API trả JSON có data thì hiển thị lên bảng
-      let payload = null;
-      const contentType = res.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        payload = await res.json();
-      }
+      const payload = await res.json().catch(() => ({}));
 
-      // Hỗ trợ vài dạng response phổ biến: { data: [...] } | { rows: [...] } | [...]
-      const rows = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.data)
-          ? payload.data
-          : Array.isArray(payload?.rows)
-            ? payload.rows
-            : null;
+      // Tạo item mới trong danh sách (dùng response API nếu có)
+      const newSource = {
+        id: payload.id || Date.now(),
+        name: payload.name || file.name.replace(/\.(xlsx|xls|csv)$/i, ""),
+        type: "File (.xlsx/.csv)",
+        flow: payload.flow || [1, 2], // bước đã hoàn thành: 01, 02
+        nextSync: payload.nextSync || null,
+        status: payload.status ?? false, // false = Không hoạt động
+        fileName: file.name,
+      };
 
-      if (rows && rows.length > 0) {
-        const cols = Object.keys(rows[0]);
-        setColumns(cols);
-        setData(rows);
-      }
-
-      setFileName(file.name);
-      setSuccess(payload?.message || `Import thành công: ${file.name}`);
+      setSources((prev) => [newSource, ...prev]);
+      setSuccess(`Đã thêm nguồn: ${newSource.name}`);
     } catch (err) {
       setError(err.message || "Không kết nối được API import.");
     } finally {
@@ -94,119 +84,159 @@ function RawPage() {
     }
   };
 
-  const handleReset = () => {
-    setData(sampleRawData);
-    setColumns([
-      "id",
-      "source",
-      "timestamp",
-      "product_code",
-      "qty",
-      "price",
-      "customer",
-      "note",
-    ]);
-    setFileName(null);
-    setError(null);
-    setSuccess(null);
+  const handleDelete = (id) => {
+    if (!window.confirm("Xóa nguồn dữ liệu này?")) return;
+    setSources((prev) => prev.filter((s) => s.id !== id));
   };
 
-  const sourceCol = columns.find((c) =>
-    ["source", "Source", "SOURCE", "source_system"].includes(c),
-  );
-  const uniqueSources = sourceCol
-    ? new Set(data.map((r) => r[sourceCol]).filter(Boolean)).size
-    : null;
+  const handleToggleStatus = (id) => {
+    setSources((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, status: !s.status } : s)),
+    );
+  };
 
-  const renderCell = (value) => {
-    if (value === null || value === undefined)
-      return <span className="null-value">null</span>;
-    if (value === "") return <span className="null-value">empty</span>;
-    return String(value);
+  const filtered = sources.filter((s) => {
+    const matchSearch =
+      !search || s.name.toLowerCase().includes(search.toLowerCase());
+    const matchType = !typeFilter || s.type.includes(typeFilter);
+    return matchSearch && matchType;
+  });
+
+  // 5 bước luồng dữ liệu
+  const renderFlow = (completed = []) => {
+    const steps = [1, 2, 3, 4, 5];
+    const labels = ["CSDL Nguồn", "Datalake", "03", "04", "05"];
+    return (
+      <div className="flow-steps">
+        {steps.map((step, i) => {
+          const done = completed.includes(step);
+          return (
+            <div
+              key={step}
+              className={`flow-dot ${done ? "done" : ""}`}
+              title={labels[i]}
+            >
+              <span>{String(step).padStart(2, "0")}</span>
+              {done && i < 2 && (
+                <small className="flow-label">{labels[i]}</small>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   return (
-    <div>
-      <h2 className="page-title">
-        <span className="badge badge-raw">RAW</span> Dữ liệu Thô
-      </h2>
-      <p className="page-desc">
-        Import file Excel lên hệ thống (lưu DB) qua API <code>/api/import</code>
-        .
-      </p>
-
-      <div className="import-toolbar">
+    <div className="raw-page">
+      <div className="page-header">
+        <div>
+          <h1>NGUỒN DỮ LIỆU THÔ</h1>
+          <p className="breadcrumb">Quản lý nguồn dữ liệu &gt; Dữ liệu thô</p>
+        </div>
+        <button className="btn-add" onClick={handleAddClick} disabled={loading}>
+          {loading ? "⏳ Đang import..." : "+ Thêm mới"}
+        </button>
         <input
           ref={fileInputRef}
           type="file"
           accept=".xlsx,.xls,.csv"
           onChange={handleFileChange}
-          style={{ display: "none" }}
+          hidden
         />
-        <button
-          className="btn btn-import"
-          onClick={handleImportClick}
-          disabled={loading}
+      </div>
+
+      {/* Bộ lọc */}
+      <div className="filter-bar">
+        <input
+          type="text"
+          placeholder="Tìm kiếm"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="input-search"
+        />
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="select-type"
         >
-          {loading ? "⏳ Đang import..." : "📥 Import Excel"}
+          <option value="">Chọn loại dữ liệu</option>
+          <option value="xlsx">File (.xlsx/.csv)</option>
+        </select>
+        <button className="btn-search">🔍 Tìm kiếm</button>
+        <button
+          className="btn-reset"
+          onClick={() => {
+            setSearch("");
+            setTypeFilter("");
+          }}
+        >
+          Đặt lại
         </button>
-        {fileName && (
-          <>
-            <button className="btn btn-reset" onClick={handleReset}>
-              ↺ Khôi phục dữ liệu mẫu
-            </button>
-            <span className="file-info">
-              File: <strong>{fileName}</strong>
-            </span>
-          </>
-        )}
       </div>
 
-      {error && <div className="error-box">{error}</div>}
-      {success && <div className="success-box">{success}</div>}
+      {error && <div className="alert error">{error}</div>}
+      {success && <div className="alert success">{success}</div>}
 
-      <div className="stats">
-        <div className="stat-card">
-          <div className="label">Tổng bản ghi</div>
-          <div className="value">{data.length}</div>
-        </div>
-        {uniqueSources !== null && (
-          <div className="stat-card">
-            <div className="label">Nguồn dữ liệu</div>
-            <div className="value">{uniqueSources}</div>
-          </div>
-        )}
-        <div className="stat-card">
-          <div className="label">Số cột</div>
-          <div className="value">{columns.length}</div>
-        </div>
-      </div>
-
-      <div className="table-wrapper">
+      {/* Bảng danh sách nguồn */}
+      <div className="table-card">
         <table>
           <thead>
             <tr>
-              {columns.map((col) => (
-                <th key={col}>{col}</th>
-              ))}
+              <th>#</th>
+              <th>Tên nguồn dữ liệu thô</th>
+              <th>Loại dữ liệu</th>
+              <th>Luồng dữ liệu</th>
+              <th>Lịch đồng bộ kế tiếp</th>
+              <th>Trạng thái</th>
+              <th>Chuyển dữ liệu thô tới vùng staging</th>
+              <th>Thao tác</th>
             </tr>
           </thead>
           <tbody>
-            {data.length === 0 ? (
+            {filtered.length === 0 ? (
               <tr>
-                <td
-                  colSpan={columns.length}
-                  style={{ textAlign: "center", color: "#94a3b8" }}
-                >
-                  Không có dữ liệu.
+                <td colSpan={8} className="empty">
+                  Chưa có nguồn nào. Bấm <b>Thêm mới</b> để import file.
                 </td>
               </tr>
             ) : (
-              data.map((row, idx) => (
-                <tr key={row.id ?? idx}>
-                  {columns.map((col) => (
-                    <td key={col}>{renderCell(row[col])}</td>
-                  ))}
+              filtered.map((s, idx) => (
+                <tr key={s.id}>
+                  <td>{idx + 1}</td>
+                  <td>{s.name}</td>
+                  <td>{s.type}</td>
+                  <td>{renderFlow(s.flow)}</td>
+                  <td>{s.nextSync || "—"}</td>
+                  <td>
+                    <span
+                      className={`badge-status ${s.status ? "active" : "inactive"}`}
+                      onClick={() => handleToggleStatus(s.id)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      {s.status ? "Hoạt động" : "Không hoạt động"}
+                    </span>
+                  </td>
+                  <td>
+                    <button className="icon-btn" title="Chuyển sang staging">
+                      ⇄
+                    </button>
+                  </td>
+                  <td className="actions">
+                    <button className="icon-btn" title="Sửa">
+                      ✏️
+                    </button>
+                    <button className="icon-btn" title="Tải xuống">
+                      ⬇️
+                    </button>
+                    <button
+                      className="icon-btn danger"
+                      title="Xóa"
+                      onClick={() => handleDelete(s.id)}
+                    >
+                      ✕
+                    </button>
+                  </td>
                 </tr>
               ))
             )}
@@ -217,4 +247,4 @@ function RawPage() {
   );
 }
 
-export default RawPage;
+export default RawSourcesPage;

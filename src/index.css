@@ -1,82 +1,161 @@
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-  background: #0f172a;
-  color: #e2e8f0;
-}
-
-#root {
+.raw-page {
+  padding: 1.5rem 2rem;
+  background: #faf7f2;
   min-height: 100vh;
+  font-family: system-ui, sans-serif;
+  color: #3d2b1f;
 }
 
-.import-toolbar {
+.page-header {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: flex-start;
   margin-bottom: 1.25rem;
-  flex-wrap: wrap;
+}
+.page-header h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: 0.02em;
+}
+.breadcrumb {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: #8b7355;
 }
 
-.btn {
-  padding: 0.55rem 1.1rem;
-  border-radius: 8px;
+.btn-add {
+  background: #8b4513;
+  color: #fff;
   border: none;
+  border-radius: 8px;
+  padding: 0.55rem 1.1rem;
   font-weight: 600;
-  font-size: 0.9rem;
+  cursor: pointer;
+}
+.btn-add:disabled { opacity: 0.6; }
+
+.filter-bar {
+  display: flex;
+  gap: 0.6rem;
+  background: #fff;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.input-search, .select-type {
+  padding: 0.5rem 0.85rem;
+  border: 1px solid #e5d9c8;
+  border-radius: 8px;
+  min-width: 180px;
+}
+.btn-search {
+  background: #e8a317;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-reset {
+  background: #fff;
+  border: 1px solid #d4c4a8;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
   cursor: pointer;
 }
 
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.table-card {
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
 }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th {
+  background: #f5ebe0;
+  text-align: left;
+  padding: 0.85rem 1rem;
+  font-weight: 600;
+  color: #5c4033;
+  white-space: nowrap;
+}
+td {
+  padding: 0.9rem 1rem;
+  border-top: 1px solid #f0e6d8;
+  vertical-align: middle;
+}
+tr:nth-child(even) td { background: #fffbf5; }
+.empty { text-align: center; color: #999; padding: 2rem !important; }
 
-.btn-import {
-  background: #3b82f6;
+.flow-steps {
+  display: flex;
+  gap: 0.35rem;
+  align-items: flex-start;
+}
+.flow-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e8e0d5;
+  color: #999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  position: relative;
+}
+.flow-dot.done {
+  background: #22c55e;
   color: #fff;
 }
-
-.btn-import:hover:not(:disabled) {
-  background: #2563eb;
+.flow-label {
+  position: absolute;
+  top: 100%;
+  font-size: 0.6rem;
+  color: #22c55e;
+  white-space: nowrap;
+  margin-top: 2px;
+  font-weight: 500;
 }
 
-.btn-reset {
-  background: #334155;
-  color: #e2e8f0;
+.badge-status {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.badge-status.active {
+  background: #22c55e;
+  color: #fff;
+}
+.badge-status.inactive {
+  background: #fff;
+  color: #e11d48;
+  border: 1px solid #fda4af;
 }
 
-.btn-reset:hover {
-  background: #475569;
+.actions { display: flex; gap: 0.4rem; }
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  opacity: 0.7;
 }
+.icon-btn:hover { opacity: 1; }
+.icon-btn.danger { color: #e11d48; }
 
-.file-info {
-  color: #94a3b8;
+.alert {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
   font-size: 0.9rem;
 }
-
-.file-info strong {
-  color: #cbd5e1;
-}
-
-.error-box {
-  background: #7f1d1d;
-  color: #fecaca;
-  border: 1px solid #991b1b;
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
-}
-
-.success-box {
-  background: #14532d;
-  color: #bbf7d0;
-  border: 1px solid #166534;
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-}
+.alert.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.alert.success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
