@@ -1,32 +1,68 @@
 import { useState, useRef, useEffect } from "react";
 
 const IMPORT_API = "http://192.168.10.164:5044/api/import";
-// Nếu có API lấy danh sách nguồn thì thay URL này
-const LIST_API = "http://localhost:5044/api/raw-sources";
+const LIST_API = "http://192.168.10.164:5044/api/import/files";
 
 function RawSourcesPage() {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const fileInputRef = useRef(null);
 
-  // Load danh sách (nếu có API list)
   useEffect(() => {
     fetchList();
   }, []);
 
+  // Map response API → shape UI đang dùng
+  const mapSource = (item) => ({
+    id: item.id ?? item.fileId ?? item._id,
+    name:
+      item.name ??
+      item.fileName ??
+      item.originalName ??
+      item.file_name ??
+      "Không tên",
+    type: item.type ?? item.fileType ?? "File (.xlsx/.csv)",
+    flow: item.flow ?? [1, 2],
+    nextSync: item.nextSync ?? item.next_sync ?? null,
+    status:
+      item.status === true ||
+      item.status === "active" ||
+      item.isActive === true,
+    fileName: item.fileName ?? item.originalName ?? item.name,
+  });
+
   const fetchList = async () => {
+    setListLoading(true);
+    setError(null);
     try {
       const res = await fetch(LIST_API);
-      if (res.ok) {
-        const data = await res.json();
-        setSources(Array.isArray(data) ? data : data.data || []);
+      if (!res.ok) {
+        throw new Error(`Không tải được danh sách (HTTP ${res.status})`);
       }
-    } catch {
-      // giữ mock nếu chưa có API list
+      const data = await res.json();
+      console.log("LIST API response:", data); // mở DevTools xem structure thật
+
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data.data)
+          ? data.data
+          : Array.isArray(data.files)
+            ? data.files
+            : Array.isArray(data.items)
+              ? data.items
+              : [];
+
+      setSources(list.map(mapSource));
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Không kết nối được API danh sách.");
+    } finally {
+      setListLoading(false);
     }
   };
 
@@ -62,21 +98,9 @@ function RawSourcesPage() {
         throw new Error(text || `Import thất bại (${res.status})`);
       }
 
-      const payload = await res.json().catch(() => ({}));
-
-      // Tạo item mới trong danh sách (dùng response API nếu có)
-      const newSource = {
-        id: payload.id || Date.now(),
-        name: payload.name || file.name.replace(/\.(xlsx|xls|csv)$/i, ""),
-        type: "File (.xlsx/.csv)",
-        flow: payload.flow || [1, 2], // bước đã hoàn thành: 01, 02
-        nextSync: payload.nextSync || null,
-        status: payload.status ?? false, // false = Không hoạt động
-        fileName: file.name,
-      };
-
-      setSources((prev) => [newSource, ...prev]);
-      setSuccess(`Đã thêm nguồn: ${newSource.name}`);
+      setSuccess(`Import thành công: ${file.name}`);
+      // Quan trọng: load lại từ DB, không chỉ update local
+      await fetchList();
     } catch (err) {
       setError(err.message || "Không kết nối được API import.");
     } finally {
@@ -86,6 +110,7 @@ function RawSourcesPage() {
 
   const handleDelete = (id) => {
     if (!window.confirm("Xóa nguồn dữ liệu này?")) return;
+    // TODO: gọi API DELETE nếu có, rồi fetchList()
     setSources((prev) => prev.filter((s) => s.id !== id));
   };
 
@@ -97,12 +122,15 @@ function RawSourcesPage() {
 
   const filtered = sources.filter((s) => {
     const matchSearch =
-      !search || s.name.toLowerCase().includes(search.toLowerCase());
-    const matchType = !typeFilter || s.type.includes(typeFilter);
+      !search ||
+      (s.name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (s.fileName || "").toLowerCase().includes(search.toLowerCase());
+    const matchType =
+      !typeFilter ||
+      (s.type || "").toLowerCase().includes(typeFilter.toLowerCase());
     return matchSearch && matchType;
   });
 
-  // 5 bước luồng dữ liệu
   const renderFlow = (completed = []) => {
     const steps = [1, 2, 3, 4, 5];
     const labels = ["CSDL Nguồn", "Datalake", "03", "04", "05"];
@@ -146,7 +174,6 @@ function RawSourcesPage() {
         />
       </div>
 
-      {/* Bộ lọc */}
       <div className="filter-bar">
         <input
           type="text"
@@ -163,12 +190,15 @@ function RawSourcesPage() {
           <option value="">Chọn loại dữ liệu</option>
           <option value="xlsx">File (.xlsx/.csv)</option>
         </select>
-        <button className="btn-search">🔍 Tìm kiếm</button>
+        <button className="btn-search" onClick={fetchList}>
+          🔍 Tìm kiếm
+        </button>
         <button
           className="btn-reset"
           onClick={() => {
             setSearch("");
             setTypeFilter("");
+            fetchList();
           }}
         >
           Đặt lại
@@ -177,8 +207,8 @@ function RawSourcesPage() {
 
       {error && <div className="alert error">{error}</div>}
       {success && <div className="alert success">{success}</div>}
+      {listLoading && <div className="alert">Đang tải danh sách...</div>}
 
-      {/* Bảng danh sách nguồn */}
       <div className="table-card">
         <table>
           <thead>
@@ -202,7 +232,7 @@ function RawSourcesPage() {
               </tr>
             ) : (
               filtered.map((s, idx) => (
-                <tr key={s.id}>
+                <tr key={s.id ?? idx}>
                   <td>{idx + 1}</td>
                   <td>{s.name}</td>
                   <td>{s.type}</td>
