@@ -2,11 +2,14 @@ import { useState, useRef, useEffect } from "react";
 
 const IMPORT_API = "http://192.168.10.164:5044/api/import";
 const LIST_API = "http://192.168.10.164:5044/api/import/files";
+const STATUS_API = (id) =>
+  `http://192.168.10.164:5044/api/import/files/${id}/status-action`;
 
 function RawSourcesPage() {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(false);
   const [listLoading, setListLoading] = useState(false);
+  const [togglingId, setTogglingId] = useState(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [error, setError] = useState(null);
@@ -17,7 +20,6 @@ function RawSourcesPage() {
     fetchList();
   }, []);
 
-  // Map response API → shape UI đang dùng
   const mapSource = (item) => ({
     id: item.id ?? item.fileId ?? item._id,
     name:
@@ -29,10 +31,13 @@ function RawSourcesPage() {
     type: item.type ?? item.fileType ?? "File (.xlsx/.csv)",
     flow: item.flow ?? [1, 2],
     nextSync: item.nextSync ?? item.next_sync ?? null,
-    status:
-      item.status === true ||
-      item.status === "active" ||
-      item.isActive === true,
+
+    // Trạng thái JOB (không dùng cho badge)
+    status: item.status ?? null,
+
+    // Trạng thái BẢN GHI — dùng cho badge Hoạt động / Không hoạt động
+    status_action: item.statusAction ?? item.status_action ?? 0,
+
     fileName: item.fileName ?? item.originalName ?? item.name,
   });
 
@@ -45,7 +50,7 @@ function RawSourcesPage() {
         throw new Error(`Không tải được danh sách (HTTP ${res.status})`);
       }
       const data = await res.json();
-      console.log("LIST API response:", data); // mở DevTools xem structure thật
+      console.log("LIST API response:", data);
 
       const list = Array.isArray(data)
         ? data
@@ -56,7 +61,7 @@ function RawSourcesPage() {
             : Array.isArray(data.items)
               ? data.items
               : [];
-
+      console.log("Mapped sources:", list);
       setSources(list.map(mapSource));
     } catch (err) {
       console.error(err);
@@ -99,7 +104,6 @@ function RawSourcesPage() {
       }
 
       setSuccess(`Import thành công: ${file.name}`);
-      // Quan trọng: load lại từ DB, không chỉ update local
       await fetchList();
     } catch (err) {
       setError(err.message || "Không kết nối được API import.");
@@ -110,14 +114,51 @@ function RawSourcesPage() {
 
   const handleDelete = (id) => {
     if (!window.confirm("Xóa nguồn dữ liệu này?")) return;
-    // TODO: gọi API DELETE nếu có, rồi fetchList()
     setSources((prev) => prev.filter((s) => s.id !== id));
   };
 
-  const handleToggleStatus = (id) => {
-    setSources((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status: !s.status } : s)),
-    );
+  // Bật/tắt trạng thái qua API
+  const handleToggleStatus = async (id, currentStatus) => {
+    if (!id || togglingId) return;
+
+    const nextStatus = currentStatus == 1 ? 0 : 1;
+    setTogglingId(id);
+    setError(null);
+
+    try {
+      const res = await fetch(STATUS_API(id), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusAction: nextStatus }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Đổi trạng thái thất bại (${res.status})`);
+      }
+
+      const payload = await res.json().catch(() => ({}));
+      // Response: { statusAction: 0, statusText: "Không hoạt động", ... }
+      const serverStatus = payload.statusAction ?? nextStatus;
+
+      setSources((prev) =>
+        prev.map((s) =>
+          s.id === id ? { ...s, status_action: serverStatus } : s,
+        ),
+      );
+
+      setSuccess(
+        payload.message ||
+          (serverStatus === 1
+            ? "Đã bật trạng thái Hoạt động"
+            : "Đã tắt trạng thái (Không hoạt động)"),
+      );
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Không đổi được trạng thái.");
+    } finally {
+      setTogglingId(null);
+    }
   };
 
   const filtered = sources.filter((s) => {
@@ -130,7 +171,7 @@ function RawSourcesPage() {
       (s.type || "").toLowerCase().includes(typeFilter.toLowerCase());
     return matchSearch && matchType;
   });
-
+  console.log("Filtered sources:", filtered);
   const renderFlow = (completed = []) => {
     const steps = [1, 2, 3, 4, 5];
     const labels = ["CSDL Nguồn", "Datalake", "03", "04", "05"];
@@ -240,17 +281,20 @@ function RawSourcesPage() {
                   <td>{s.nextSync || "—"}</td>
                   <td>
                     <span
-                      className={`badge-status ${s.status ? "active" : "inactive"}`}
-                      onClick={() => handleToggleStatus(s.id)}
-                      style={{ cursor: "pointer" }}
+                      className={`badge-status ${s.status_action == 1 ? "active" : "inactive"}`}
+                      onClick={() => handleToggleStatus(s.id, s.status_action)}
                     >
-                      {s.status ? "Hoạt động" : "Không hoạt động"}
+                      {s.status_action == 1 ? "Hoạt động" : "Không hoạt động"}
                     </span>
                   </td>
                   <td>
-                    <button className="icon-btn" title="Chuyển sang staging">
-                      ⇄
-                    </button>
+                    {s.status_action == 1 ? (
+                      <button className="icon-btn" title="Chuyển sang staging">
+                        ⇄
+                      </button>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td className="actions">
                     <button className="icon-btn" title="Sửa">
